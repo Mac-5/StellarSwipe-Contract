@@ -78,6 +78,53 @@ fn create_and_read_signal() {
 }
 
 #[test]
+fn test_submit_signal_from_template() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    #[allow(deprecated)]
+    let contract_id = env.register_contract(None, SignalRegistry);
+    let client = SignalRegistryClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let provider = Address::generate(&env);
+    client.initialize(&admin);
+
+    let template_id = client.save_signal_template(
+        &provider,
+        &SignalTemplate {
+            asset_pair: String::from_str(&env, "XLM/USDC"),
+            action: SignalAction::Buy,
+            risk_rating: 3,
+            category: String::from_str(&env, "momentum"),
+            default_expiry_hours: 24,
+        },
+    );
+
+    let signal_id = client.submit_signal_from_template(
+        &provider,
+        &template_id,
+        &SignalTemplateOverrides {
+            asset_pair: None,
+            action: None,
+            risk_rating: None,
+            category: None,
+            expiry_hours: None,
+            price: Some(100_000),
+            rationale: Some(String::from_str(&env, "Template rationale")),
+        },
+    );
+
+    let signal = client.get_signal(&signal_id).unwrap();
+    assert_eq!(signal.asset_pair, String::from_str(&env, "XLM/USDC"));
+    assert_eq!(signal.price, 100_000);
+    assert_eq!(
+        signal.rationale,
+        String::from_str(&env, "Template rationale")
+    );
+}
+
+#[test]
 fn test_invalid_asset_pair_rejected() {
     let env = Env::default();
     env.mock_all_auths();
