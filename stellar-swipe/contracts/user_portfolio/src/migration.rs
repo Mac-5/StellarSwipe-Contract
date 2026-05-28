@@ -41,7 +41,7 @@ pub fn migrate_user(env: &Env, user: &Address) -> (u32, u32) {
             .expect("position data missing during migration");
         match pos.status {
             PositionStatus::Open => open_ids.push_back(id),
-            PositionStatus::Closed => closed_ids.push_back(id),
+            PositionStatus::Closed | PositionStatus::Closing => closed_ids.push_back(id),
         }
     }
 

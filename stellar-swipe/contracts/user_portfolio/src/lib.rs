@@ -2,18 +2,22 @@
 
 #![cfg_attr(target_family = "wasm", no_std)]
 
+mod achievements;
+mod badges;
 mod migration;
+mod preferences;
 mod queries;
 mod storage;
 mod subscriptions;
 #[cfg(test)]
 #[path = "tests/mod.rs"]
 mod portfolio_tests;
-mod queries;
-mod storage;
-mod subscriptions;
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Vec};
+pub use achievements::{Achievement, AchievementType};
+pub use badges::{Badge, BadgeType};
+pub use preferences::NotificationPrefs;
+
+use soroban_sdk::{contract, contractimpl, contracterror, contracttype, Address, Env, Vec};
 use storage::DataKey;
 
 pub use subscriptions::SubscriptionError;
@@ -43,7 +47,7 @@ pub enum PositionStatus {
 
 /// Error returned when a close is attempted on a position that is already
 /// `Closing` or `Closed`.
-#[contracttype]
+#[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum PositionError {
@@ -362,7 +366,7 @@ impl UserPortfolio {
             &env,
             shared::events::EvtPositionClosed {
                 schema_version: shared::events::SCHEMA_VERSION,
-                user,
+                user: user.clone(),
                 trade_id: position_id,
                 exit_price,
                 realized_pnl,
@@ -570,6 +574,30 @@ impl UserPortfolio {
     /// Used by SignalRegistry (cross-contract) to gate PREMIUM signal visibility.
     pub fn check_subscription(env: Env, user: Address, provider: Address) -> bool {
         subscriptions::check_subscription(&env, &user, &provider)
+    }
+
+    // ── Issue #430: Notification Preferences ─────────────────────────────────
+
+    /// Store notification preferences for `user`. Caller must be `user`.
+    pub fn set_notification_preferences(
+        env: Env,
+        user: Address,
+        prefs: NotificationPrefs,
+    ) {
+        preferences::set_notification_preferences(&env, &user, prefs);
+    }
+
+    /// Retrieve notification preferences for `user`.
+    /// Returns default (all enabled) if never set.
+    pub fn get_notification_preferences(env: Env, user: Address) -> NotificationPrefs {
+        preferences::get_notification_preferences(&env, &user)
+    }
+
+    // ── Issue #432: Achievement System ───────────────────────────────────────
+
+    /// Returns all achievements for `user` with current progress.
+    pub fn get_achievements(env: Env, user: Address) -> Vec<Achievement> {
+        achievements::get_achievements(&env, &user)
     }
 
     fn require_admin(env: &Env) {

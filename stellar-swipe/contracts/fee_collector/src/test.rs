@@ -12,6 +12,14 @@ use crate::{
     set_pending_fees, set_treasury_balance, ContractError, FeeCollector, FeeCollectorClient,
 };
 
+/// Pre-mark a trader as having already completed their first trade,
+/// so subsequent `collect_fee` calls use the normal fee path.
+fn mark_trader_has_traded(env: &Env, contract_id: &Address, trader: &Address) {
+    env.as_contract(contract_id, || {
+        crate::storage::set_has_traded(env, trader);
+    });
+}
+
 // Stellar burn address (all-zeros public key encoded as strkey)
 const _BURN_ADDRESS: &str = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
 
@@ -434,6 +442,9 @@ fn test_collect_fee_tracks_volume_and_applies_rebate_tiers() {
 
     StellarAssetClient::new(&env, &token).mint(&trader, &(100_000 * 10_000_000));
 
+    // Pre-mark trader as having completed their first trade so normal fees apply.
+    mark_trader_has_traded(&env, &contract_id, &trader);
+
     let fee_one = client.collect_fee(&trader, &token, &(9_000 * 10_000_000), &asset);
     assert_eq!(fee_one, 270_000_000);
     assert_eq!(client.monthly_trade_volume(&trader), 9_000 * 10_000_000);
@@ -689,6 +700,7 @@ fn test_collect_fee_burn_amount_calculation() {
     let trade_amount: i128 = 1_000_000;
     StellarAssetClient::new(&env, &token).mint(&trader, &trade_amount);
 
+    mark_trader_has_traded(&env, &contract_id, &trader);
     let fee = client.collect_fee(&trader, &token, &trade_amount, &asset);
     assert_eq!(fee, 3_000); // total fee collected from trader
 
@@ -721,6 +733,7 @@ fn test_collect_fee_zero_burn_rate_full_treasury() {
     let trade_amount: i128 = 1_000_000;
     StellarAssetClient::new(&env, &token).mint(&trader, &trade_amount);
 
+    mark_trader_has_traded(&env, &contract_id, &trader);
     let fee = client.collect_fee(&trader, &token, &trade_amount, &asset);
     assert_eq!(fee, 3_000);
     assert_eq!(client.treasury_balance(&token), 3_000); // nothing burned
@@ -751,6 +764,7 @@ fn test_collect_fee_full_burn_rate_zero_treasury() {
     let trade_amount: i128 = 1_000_000;
     StellarAssetClient::new(&env, &token).mint(&trader, &trade_amount);
 
+    mark_trader_has_traded(&env, &contract_id, &trader);
     let fee = client.collect_fee(&trader, &token, &trade_amount, &asset);
     assert_eq!(fee, 3_000);
     assert_eq!(client.treasury_balance(&token), 0); // all burned
@@ -898,6 +912,7 @@ fn test_fee_rounds_down_user_favorable() {
     let trade_amount: i128 = 9_999;
     StellarAssetClient::new(&env, &token).mint(&trader, &trade_amount);
 
+    mark_trader_has_traded(&env, &contract_id, &trader);
     let fee = client.collect_fee(&trader, &token, &trade_amount, &asset);
     // 9999 * 30 / 10000 = 29.997 → truncated to 29 (user pays less, not more)
     assert_eq!(fee, 29);
@@ -931,6 +946,7 @@ fn test_burn_rounds_down_no_dust() {
     let trade_amount: i128 = 1_000_001;
     StellarAssetClient::new(&env, &token).mint(&trader, &trade_amount);
 
+    mark_trader_has_traded(&env, &contract_id, &trader);
     let fee = client.collect_fee(&trader, &token, &trade_amount, &asset);
     assert_eq!(fee, 3_000); // 1_000_001 * 30 / 10_000 = 3000 (truncated)
 
