@@ -677,6 +677,11 @@ impl SignalRegistry {
         // Check if signals are paused
         admin::require_not_paused(env, String::from_str(env, CAT_SIGNALS))?;
 
+        // Issue #424: Banned providers cannot submit signals
+        if providers::is_provider_banned(env, &provider) {
+            return Err(AdminError::Unauthorized);
+        }
+
         // Verify provider account still exists on Stellar
         if !Self::check_provider_exists(env, &provider) {
             return Err(AdminError::Unauthorized);
@@ -1299,6 +1304,59 @@ impl SignalRegistry {
         Ok(())
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // Issue #424: Provider Ban Mechanism
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Ban a provider, cancelling all active signals and slashing full stake.
+    /// Admin only. Emits `ProviderBanned` event.
+    ///
+    /// # Arguments
+    /// * `caller` - Must be the current admin.
+    /// * `provider` - Provider address to ban.
+    /// * `reason_hash` - On-chain evidence hash (e.g. IPFS CID of dispute docs).
+    /// * `stake_vault` - Address of the StakeVault contract for slashing.
+    pub fn ban_provider(
+        env: Env,
+        caller: Address,
+        provider: Address,
+        reason_hash: String,
+        stake_vault: Address,
+    ) -> Result<(), AdminError> {
+        admin::require_admin(&env, &caller)?;
+        caller.require_auth();
+
+        let mut signals = Self::get_signals_map(&env);
+        let (signals_cancelled, stake_slashed) = providers::ban_provider(
+            &env,
+            &mut signals,
+            &provider,
+            &reason_hash,
+            &stake_vault,
+        );
+        Self::save_signals_map(&env, &signals);
+
+        providers::emit_provider_banned(
+            &env,
+            &provider,
+            &reason_hash,
+            signals_cancelled,
+            stake_slashed,
+        );
+
+        Ok(())
+    }
+
+    /// Check if a provider is banned
+    pub fn is_provider_banned(env: Env, provider: Address) -> bool {
+        providers::is_provider_banned(&env, &provider)
+    }
+
+    /// Get the ban reason hash for a provider (None if not banned)
+    pub fn get_ban_reason(env: Env, provider: Address) -> Option<String> {
+        providers::get_ban_reason(&env, &provider)
+    }
+
     /// Check whether a provider meets automated verification criteria.
     pub fn check_verification_eligibility(env: Env, provider: Address) -> VerificationEligibility {
         let stakes = Self::get_provider_stakes_map(&env);
@@ -1621,6 +1679,18 @@ impl SignalRegistry {
     pub fn get_global_analytics(env: Env) -> analytics::GlobalAnalytics {
         let signals = Self::get_signals_map(&env);
         analytics::calculate_global_analytics(&env, &signals)
+    }
+
+    /// Get category-level performance analytics (Issue #419)
+    /// Returns analytics for the given category, including avg success rate,
+    /// avg ROI, total signals, total adopters, and top provider.
+    /// Empty categories return zero-valued analytics (no error).
+    pub fn get_category_analytics(
+        env: Env,
+        category: SignalCategory,
+    ) -> analytics::CategoryAnalytics {
+        let signals = Self::get_signals_map(&env);
+        analytics::calculate_category_analytics(&env, &signals, &category)
     }
 
     /* =========================
