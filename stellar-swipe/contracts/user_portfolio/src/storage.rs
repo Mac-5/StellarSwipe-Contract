@@ -25,4 +25,19 @@ pub enum DataKey {
     CurrentStreak(Address),
     /// Per-user best streak observed
     BestStreak(Address),
+    /// Migration: marks a user as already migrated from V1 to V2 layout.
+    MigratedUser(Address),
+    /// Migration: queue of users pending V1→V2 migration.
+    MigrationQueue,
+    /// Per-user notification preferences (Issue #430).
+    NotificationPrefs(Address),
+    /// Per-user achievement list (Issue #432).
+    UserAchievements(Address),
+    // Badge-related keys used by badges.rs
+    UserBadges(Address),
+    UserClosedTradeCount(Address),
+    UserProfitStreak(Address),
+    LeaderboardRank(Address),
+    EarlyAdopterCap,
+    TotalUsersFirstOpen,
 }

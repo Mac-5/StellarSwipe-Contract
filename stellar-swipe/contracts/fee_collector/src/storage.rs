@@ -26,6 +26,8 @@ pub enum StorageKey {
     ProviderDailyFeeShares(Address, u64),
     /// Day number of the provider's first recorded earnings (for ALL_TIME period_start).
     ProviderEarningsFirstDay(Address),
+    /// Whether a user has completed their first trade (Issue #428).
+    HasTraded(Address),
 }
 
 #[contracttype]
@@ -205,4 +207,19 @@ pub fn get_provider_earnings_first_day(env: &Env, provider: &Address) -> Option<
     env.storage()
         .persistent()
         .get(&StorageKey::ProviderEarningsFirstDay(provider.clone()))
+}
+
+// --- First-trade tracking (Issue #428) ---
+
+pub fn has_traded(env: &Env, user: &Address) -> bool {
+    env.storage()
+        .persistent()
+        .get(&StorageKey::HasTraded(user.clone()))
+        .unwrap_or(false)
+}
+
+pub fn set_has_traded(env: &Env, user: &Address) {
+    env.storage()
+        .persistent()
+        .set(&StorageKey::HasTraded(user.clone()), &true);
 }

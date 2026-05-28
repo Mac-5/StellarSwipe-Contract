@@ -4,7 +4,12 @@ mod errors;
 pub use errors::ContractError;
 
 mod events;
-pub use events::{FeeRateUpdated, FeesBurned, FeesClaimed, TreasuryWithdrawal, WithdrawalQueued};
+pub use events::{FeeRateUpdated, FeesBurned, FeesClaimed, FirstTradeFeeWaived, TreasuryWithdrawal, WithdrawalQueued};
+use events::{
+    emit_fee_collected, emit_fee_rate_updated, emit_fees_claimed, emit_first_trade_fee_waived,
+    emit_treasury_withdrawal, emit_withdrawal_queued, EvtFeeCollected, EvtFeeRateUpdated,
+    EvtFeesClaimed, EvtTreasuryWithdrawal, EvtWithdrawalQueued,
+};
 
 mod rebates;
 
@@ -12,14 +17,15 @@ mod reports;
 pub use reports::{EarningsReport, ReportPeriod};
 
 mod storage;
-pub use storage::{
+use storage::{
     get_admin, get_burn_rate, get_fee_rate, get_monthly_trade_volume, get_oracle_contract,
-    get_pending_fees, get_queued_withdrawal, get_treasury_balance, is_initialized,
+    get_pending_fees, get_queued_withdrawal, get_treasury_balance, has_traded, is_initialized,
     remove_monthly_trade_volume, remove_queued_withdrawal, set_admin,
-    set_burn_rate as set_burn_rate_storage, set_fee_rate as set_fee_rate_storage, set_initialized,
-    set_monthly_trade_volume, set_oracle_contract as set_oracle_contract_storage, set_pending_fees,
-    set_queued_withdrawal, set_treasury_balance, MonthlyTradeVolume, QueuedWithdrawal, StorageKey,
-    MAX_BURN_RATE_BPS, MAX_FEE_RATE_BPS, MIN_FEE_RATE_BPS,
+    set_burn_rate as set_burn_rate_storage, set_fee_rate as set_fee_rate_storage, set_has_traded,
+    set_initialized, set_monthly_trade_volume,
+    set_oracle_contract as set_oracle_contract_storage, set_pending_fees, set_queued_withdrawal,
+    set_treasury_balance, MonthlyTradeVolume, QueuedWithdrawal, StorageKey, MAX_BURN_RATE_BPS,
+    MAX_FEE_RATE_BPS, MIN_FEE_RATE_BPS,
 };
 
 use soroban_sdk::{contract, contractimpl, token, Address, Env};
@@ -379,6 +385,14 @@ impl FeeCollector {
 
         if trade_amount <= 0 {
             return Err(ContractError::InvalidAmount);
+        }
+
+        // Issue #428: waive fee for user's first trade.
+        if !has_traded(&env, &trader) {
+            set_has_traded(&env, &trader);
+            emit_first_trade_fee_waived(&env, &trader);
+            rebates::record_trade_volume(&env, &trader, &trade_asset, trade_amount)?;
+            return Ok(0);
         }
 
         let fee_rate = rebates::get_fee_rate_for_user(&env, &trader);

@@ -58,7 +58,7 @@ pub fn compute_get_pnl(env: &Env, user: Address) -> PnlSummary {
                     total_invested = s;
                 }
             }
-            PositionStatus::Closed => {
+            PositionStatus::Closed | PositionStatus::Closing => {
                 if let Some(s) = realized.checked_add(pos.realized_pnl) {
                     realized = s;
                 }
@@ -289,7 +289,7 @@ fn rebuild_position_indexes(env: &Env, user: Address) -> (Vec<u64>, Vec<u64>) {
         };
         match position.status {
             PositionStatus::Open => open_ids.push_back(id),
-            PositionStatus::Closed => closed_ids.push_back(id),
+            PositionStatus::Closed | PositionStatus::Closing => closed_ids.push_back(id),
         }
     }
 
