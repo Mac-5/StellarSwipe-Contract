@@ -16,7 +16,7 @@ mod portfolio_tests;
 
 pub use achievements::{Achievement, AchievementType};
 pub use badges::{Badge, BadgeType};
-pub use preferences::NotificationPrefs;
+pub use preferences::{HoldDuration, NotificationPrefs, RiskRating, SignalCategory, SignalAction, SignalSummary, TradingStyle};
 
 use soroban_sdk::{contract, contractimpl, contracterror, contracttype, Address, Env, Vec};
 use storage::DataKey;
@@ -32,6 +32,14 @@ pub struct PnlSummary {
     pub unrealized_pnl: Option<i128>,
     pub total_pnl: i128,
     pub roi_bps: i32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnchorDepositInfo {
+    pub deposit_address: Address,
+    pub token: Address,
+    pub amount_fiat: i128,
 }
 
 #[contracttype]
@@ -127,6 +135,34 @@ impl UserPortfolio {
         env.storage().instance().get(&DataKey::TradeExecutor)
     }
 
+    /// Admin: configure an anchor deposit address for a specific token.
+    pub fn set_anchor_deposit_address(env: Env, token: Address, deposit_address: Address) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::AnchorDepositAddress(token), &deposit_address);
+    }
+
+    /// Query an anchor deposit address for a token and requested fiat amount.
+    pub fn get_anchor_deposit_address(
+        env: Env,
+        _user: Address,
+        token: Address,
+        amount_fiat: i128,
+    ) -> AnchorDepositInfo {
+        let deposit_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::AnchorDepositAddress(token.clone()))
+            .expect("anchor deposit address not configured for token");
+
+        AnchorDepositInfo {
+            deposit_address,
+            token,
+            amount_fiat,
+        }
+    }
+
     /// Admin: set or clear the KYC-verified flag for a user.
     /// No PII is stored — only a boolean.
     /// Emits `KYCStatusUpdated { user, verified }`.
@@ -207,6 +243,37 @@ impl UserPortfolio {
         env.storage()
             .instance()
             .set(&DataKey::OracleAssetPair, &asset_pair);
+    }
+
+    pub fn get_onboarding_status(env: Env, user: Address) -> OnboardingStatus {
+        env.storage()
+            .persistent()
+            .get(&DataKey::UserOnboardingStatus(user))
+            .unwrap_or(OnboardingStatus::NotStarted)
+    }
+
+    pub fn get_onboarding_milestone(env: Env, user: Address) -> Option<String> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::UserOnboardingMilestone(user))
+    }
+
+    pub fn update_onboarding_status(
+        env: Env,
+        user: Address,
+        status: OnboardingStatus,
+        milestone: Option<String>,
+    ) {
+        Self::require_admin(&env);
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserOnboardingStatus(user.clone()), &status);
+        if let Some(m) = milestone.clone() {
+            env.storage()
+                .persistent()
+                .set(&DataKey::UserOnboardingMilestone(user.clone()), &m);
+        }
+        onboarding::emit_onboarding_status_updated(&env, user, status, milestone);
     }
 
     /// Opens a position for `user` (caller must be `user`). `amount` is invested notional at entry.
@@ -594,11 +661,50 @@ impl UserPortfolio {
         preferences::get_notification_preferences(&env, &user)
     }
 
+    /// Configure the SignalRegistry contract address used by recommendation queries.
+    pub fn set_signal_registry(env: Env, caller: Address, registry: Address) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::SignalRegistry, &registry);
+    }
+
+    /// Retrieve the configured SignalRegistry address.
+    pub fn get_signal_registry(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::SignalRegistry)
+    }
+
+    /// Store trading style profile for `user`. Caller must be `user`.
+    pub fn set_trading_style(env: Env, user: Address, style: TradingStyle) {
+        preferences::set_trading_style(&env, &user, style);
+    }
+
+    /// Retrieve trading style profile for `user`.
+    pub fn get_trading_style(env: Env, user: Address) -> Option<TradingStyle> {
+        preferences::get_trading_style(&env, &user)
+    }
+
+    /// Returns recommended active signals for `user` based on their trading style.
+    /// When no style is configured, returns all active signals.
+    pub fn get_recommended_signals(env: Env, user: Address) -> Vec<SignalSummary> {
+        let registry: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::SignalRegistry)
+            .expect("signal registry not configured");
+        preferences::get_recommended_signals(&env, &user, &registry)
+    }
+
     // ── Issue #432: Achievement System ───────────────────────────────────────
 
     /// Returns all achievements for `user` with current progress.
     pub fn get_achievements(env: Env, user: Address) -> Vec<Achievement> {
         achievements::get_achievements(&env, &user)
+    }
+
+    /// Returns whether the user has completed the quest identified by `quest_id`.
+    pub fn verify_quest_completion(env: Env, user: Address, quest_id: u32) -> bool {
+        achievements::verify_quest_completion(&env, &user, quest_id)
     }
 
     fn require_admin(env: &Env) {
@@ -1019,6 +1125,37 @@ mod migration_tests {
                 .unwrap_or_else(|| soroban_sdk::Vec::new(&env))
         });
         assert_eq!(open_ids.len(), 0); // position 1 was closed
+    }
+}
+
+#[cfg(test)]
+mod anchor_deposit_tests {
+    use super::oracle_ok::OracleMock;
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::Env;
+
+    #[test]
+    fn get_anchor_deposit_address_returns_configured_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let oracle = env.register_contract(None, OracleMock);
+        let contract_id = env.register_contract(None, UserPortfolio);
+        let client = UserPortfolioClient::new(&env, &contract_id);
+        client.initialize(&admin, &oracle);
+
+        let token = Address::generate(&env);
+        let deposit_address = Address::generate(&env);
+        client.set_anchor_deposit_address(&token, &deposit_address);
+
+        let user = Address::generate(&env);
+        let info = client.get_anchor_deposit_address(&user, &token, &1_000);
+
+        assert_eq!(info.deposit_address, deposit_address);
+        assert_eq!(info.token, token);
+        assert_eq!(info.amount_fiat, 1_000);
     }
 }
 

@@ -33,6 +33,8 @@ pub enum DataKey {
     NotificationPrefs(Address),
     /// Per-user achievement list (Issue #432).
     UserAchievements(Address),
+    /// Anchor deposit destination address by token.
+    AnchorDepositAddress(Address),
     // Badge-related keys used by badges.rs
     UserBadges(Address),
     UserClosedTradeCount(Address),
@@ -40,6 +42,10 @@ pub enum DataKey {
     LeaderboardRank(Address),
     EarlyAdopterCap,
     TotalUsersFirstOpen,
+    /// Per-user trading style profile for personalized signal recommendations.
+    TradingStyle(Address),
+    /// Configured SignalRegistry contract address used by recommendation queries.
+    SignalRegistry,
     /// Per-user signal watchlist (Issue: signal watchlist).
     Watchlist(Address),
 }
