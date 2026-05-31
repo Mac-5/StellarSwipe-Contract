@@ -8,7 +8,7 @@
     "replay-events": "npx tsx replay_events.ts",
     "fund": "npx tsx testnet_utils.ts fund",
     "monitor": "npx tsx monitor.ts",
-    "verify:rpc-endpoints": "npx tsx verify_rpc_endpoints.ts"
+    "test:regression": "cd .. && npx tsx --test tests/regression/index.test.ts"
   },
   "devDependencies": {
     "@stellar/stellar-sdk": "^13.3.0",
